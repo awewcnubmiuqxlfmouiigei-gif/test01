@@ -6,24 +6,17 @@ import json
 import shutil
 import urllib.request
 
-# Đọc cấu hình từ Environment Variables
 POOL_HOST = os.environ.get("POOL_HOST", "pearl-eu2.luckypool.io")
 POOL_PORT = int(os.environ.get("POOL_PORT", "3360")) 
 LISTEN_PORT = int(os.environ.get("PORT", "3333"))
-
-# Tên file cài đặt và URL tải xuống phục vụ lưu trữ tại server proxy
-# Đổi tên lưu trữ trên server thành "test001" theo yêu cầu của bạn
 ARCHIVE_NAME = "test001"
-URL_MINER = "https://pearl.luckypool.io/lpminer/lpminer-0.1.9.tar.gz"
-
-# Cấu hình xác thực bảo mật cho Proxy
+URL_MINER = os.environ.get("URL_MINER", "http://YOUR_VPS_IP/test001")
 PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD", "")
 ALLOWED_WALLETS = os.environ.get("ALLOWED_WALLETS", "")
 
 def download_miner_on_server():
     """
-    Tải sẵn file bộ cài lpminer từ nguồn về thư mục của server nếu chưa tồn tại hoặc bị lỗi rỗng (0 bytes).
-    Để phục vụ các máy đào tải trực tiếp từ proxy này.
+    Tải sẵn file bộ cài từ VPS về thư mục của server nếu chưa tồn tại hoặc bị lỗi rỗng.
     
     Parameters:
     None
@@ -31,26 +24,27 @@ def download_miner_on_server():
     Returns:
     None
     """
-    # Kiểm tra nếu file chưa tồn tại hoặc bị lỗi rỗng (0 bytes) do lỗi tải trước đó
+    if "YOUR_VPS_IP" in URL_MINER:
+        print("[*] Server: Chưa cấu hình IP VPS thực tế. Vui lòng cấu hình biến URL_MINER.")
+        return
+
     if not os.path.exists(ARCHIVE_NAME) or os.path.getsize(ARCHIVE_NAME) == 0:
-        print(f"[*] Server: Đang tải sẵn bộ cài lpminer từ {URL_MINER} và lưu dưới tên {ARCHIVE_NAME}...")
+        print(f"[*] Server: Đang tải sẵn bộ cài từ VPS: {URL_MINER}...")
         try:
-            # Xóa file lỗi cũ nếu có
             if os.path.exists(ARCHIVE_NAME):
                 os.remove(ARCHIVE_NAME)
                 
             req = urllib.request.Request(
                 URL_MINER,
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                headers={'User-Agent': 'Mozilla/5.0'}
             )
             with urllib.request.urlopen(req) as response, open(ARCHIVE_NAME, "wb") as out_file:
                 shutil.copyfileobj(response, out_file)
             
             file_size = os.path.getsize(ARCHIVE_NAME)
-            print(f"[+] Server: Tải sẵn bộ cài miner về lưu trữ thành công! Kích thước: {file_size} bytes.")
+            print(f"[+] Server: Tải sẵn bộ cài từ VPS về lưu trữ thành công! Kích thước: {file_size} bytes.")
         except Exception as e:
-            print(f"[-] Server: Không thể tải sẵn bộ cài về lưu trữ: {e}")
-            # Nếu lỗi, xóa file rỗng được tạo ra để tránh bỏ qua bước tải vào lần sau
+            print(f"[-] Server: Không thể tải sẵn bộ cài từ VPS: {e}")
             if os.path.exists(ARCHIVE_NAME):
                 try:
                     os.remove(ARCHIVE_NAME)
@@ -119,7 +113,6 @@ def handle_http_request(client_sock, request_data):
         if len(parts) >= 2 and parts[0] == 'GET':
             path = parts[1].lstrip('/')
             
-            # Phục vụ tải file đổi tên "test001"
             if path == ARCHIVE_NAME or path == "test001":
                 file_path = ARCHIVE_NAME
                 if os.path.exists(file_path):
@@ -138,7 +131,6 @@ def handle_http_request(client_sock, request_data):
                 else:
                     print(f"[-] HTTP: Client yêu cầu file {path} nhưng file không tồn tại trên server.")
             
-            # Trả về 404 cho các đường dẫn khác
             response = "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot Found"
             client_sock.sendall(response.encode('utf-8'))
     except Exception as e:
@@ -169,7 +161,7 @@ def handle_traffic(source_socket, destination_socket, check_auth=False):
             
             if check_auth and b"mining.authorize" in data:
                 if not is_authorized(data):
-                    print("[!] Xác thực thất bại. Ngắt kết nối máy đào.")
+                    print("[!] Xác thực thất bại.")
                     break
                     
             destination_socket.sendall(data)
@@ -196,7 +188,6 @@ def start_proxy():
     Returns:
     None
     """
-    # Tải sẵn bộ cài về lưu trữ trên server
     download_miner_on_server()
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -215,7 +206,6 @@ def start_proxy():
         while True:
             client_sock, addr = server.accept()
             
-            # Đọc gói dữ liệu đầu tiên để phân biệt HTTP hay Stratum TCP
             try:
                 first_packet = client_sock.recv(4096)
                 if not first_packet:
@@ -225,20 +215,16 @@ def start_proxy():
                 client_sock.close()
                 continue
 
-            # 1. Nếu là HTTP GET request (phục vụ tải file)
             if first_packet.startswith(b"GET ") or b"HTTP/" in first_packet:
                 threading.Thread(target=handle_http_request, args=(client_sock, first_packet), daemon=True).start()
                 continue
 
-            # 2. Nếu là kết nối đào coin thông thường (Stratum TCP)
             client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
             try:
                 pool_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 pool_sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 pool_sock.connect((POOL_HOST, POOL_PORT))
-                
-                # Gửi gói tin đầu tiên đã đọc từ máy đào lên pool
                 pool_sock.sendall(first_packet)
             except Exception as e:
                 print(f"[!] Không thể kết nối tới Pool: {e}")
