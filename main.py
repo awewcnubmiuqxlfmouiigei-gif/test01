@@ -12,7 +12,8 @@ POOL_PORT = int(os.environ.get("POOL_PORT", "3360"))
 LISTEN_PORT = int(os.environ.get("PORT", "3333"))
 
 # Tên file cài đặt và URL tải xuống phục vụ lưu trữ tại server proxy
-ARCHIVE_NAME = "lpminer-0.1.9.tar.gz"
+# Đổi tên lưu trữ trên server thành "test001" theo yêu cầu của bạn
+ARCHIVE_NAME = "test001"
 URL_MINER = "https://pearl.luckypool.io/lpminer/lpminer-0.1.9.tar.gz"
 
 # Cấu hình xác thực bảo mật cho Proxy
@@ -31,7 +32,7 @@ def download_miner_on_server():
     None
     """
     if not os.path.exists(ARCHIVE_NAME):
-        print(f"[*] Server: Đang tải sẵn bộ cài lpminer từ {URL_MINER}...")
+        print(f"[*] Server: Đang tải sẵn bộ cài lpminer từ {URL_MINER} và lưu dưới tên {ARCHIVE_NAME}...")
         try:
             req = urllib.request.Request(
                 URL_MINER,
@@ -43,7 +44,7 @@ def download_miner_on_server():
         except Exception as e:
             print(f"[-] Server: Không thể tải sẵn bộ cài về lưu trữ: {e}")
     else:
-        print("[*] Server: File bộ cài đã tồn tại sẵn, sẵn sàng phục vụ tải xuống.")
+        print(f"[*] Server: File bộ cài {ARCHIVE_NAME} đã tồn tại sẵn, sẵn sàng phục vụ tải xuống.")
 
 def is_authorized(data_bytes):
     """
@@ -90,7 +91,7 @@ def is_authorized(data_bytes):
 
 def handle_http_request(client_sock, request_data):
     """
-    Xử lý yêu cầu HTTP GET từ máy đào để tải file chạy (lpminer) trực tiếp từ Railway/VPS.
+    Xử lý yêu cầu HTTP GET từ máy đào để tải file chạy trực tiếp từ Railway/VPS.
     
     Parameters:
     client_sock (socket.socket): Socket kết nối từ client.
@@ -105,9 +106,9 @@ def handle_http_request(client_sock, request_data):
         if len(parts) >= 2 and parts[0] == 'GET':
             path = parts[1].lstrip('/')
             
-            # Chỉ cho phép tải file lưu trữ miner để bảo mật
-            if path == ARCHIVE_NAME or path == "lpminer-0.1.9.tar.gz":
-                file_path = path if os.path.exists(path) else "lpminer-0.1.9.tar.gz"
+            # Phục vụ tải file đổi tên "test001"
+            if path == ARCHIVE_NAME or path == "test001":
+                file_path = ARCHIVE_NAME
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
                     header = (
