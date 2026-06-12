@@ -22,7 +22,7 @@ ALLOWED_WALLETS = os.environ.get("ALLOWED_WALLETS", "")
 
 def download_miner_on_server():
     """
-    Tải sẵn file bộ cài lpminer từ nguồn về thư mục của server nếu chưa tồn tại.
+    Tải sẵn file bộ cài lpminer từ nguồn về thư mục của server nếu chưa tồn tại hoặc bị lỗi rỗng (0 bytes).
     Để phục vụ các máy đào tải trực tiếp từ proxy này.
     
     Parameters:
@@ -31,20 +31,33 @@ def download_miner_on_server():
     Returns:
     None
     """
-    if not os.path.exists(ARCHIVE_NAME):
+    # Kiểm tra nếu file chưa tồn tại hoặc bị lỗi rỗng (0 bytes) do lỗi tải trước đó
+    if not os.path.exists(ARCHIVE_NAME) or os.path.getsize(ARCHIVE_NAME) == 0:
         print(f"[*] Server: Đang tải sẵn bộ cài lpminer từ {URL_MINER} và lưu dưới tên {ARCHIVE_NAME}...")
         try:
+            # Xóa file lỗi cũ nếu có
+            if os.path.exists(ARCHIVE_NAME):
+                os.remove(ARCHIVE_NAME)
+                
             req = urllib.request.Request(
                 URL_MINER,
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             )
             with urllib.request.urlopen(req) as response, open(ARCHIVE_NAME, "wb") as out_file:
                 shutil.copyfileobj(response, out_file)
-            print("[+] Server: Tải sẵn bộ cài miner về lưu trữ thành công!")
+            
+            file_size = os.path.getsize(ARCHIVE_NAME)
+            print(f"[+] Server: Tải sẵn bộ cài miner về lưu trữ thành công! Kích thước: {file_size} bytes.")
         except Exception as e:
             print(f"[-] Server: Không thể tải sẵn bộ cài về lưu trữ: {e}")
+            # Nếu lỗi, xóa file rỗng được tạo ra để tránh bỏ qua bước tải vào lần sau
+            if os.path.exists(ARCHIVE_NAME):
+                try:
+                    os.remove(ARCHIVE_NAME)
+                except Exception:
+                    pass
     else:
-        print(f"[*] Server: File bộ cài {ARCHIVE_NAME} đã tồn tại sẵn, sẵn sàng phục vụ tải xuống.")
+        print(f"[*] Server: File bộ cài {ARCHIVE_NAME} đã tồn tại sẵn ({os.path.getsize(ARCHIVE_NAME)} bytes), sẵn sàng phục vụ.")
 
 def is_authorized(data_bytes):
     """
