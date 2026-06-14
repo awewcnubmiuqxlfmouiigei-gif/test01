@@ -3,16 +3,51 @@ import threading
 import os
 import shutil
 import urllib.request
+import json
 
 # Cấu hình Pool đào Pearlhash
 POOL_HOST = "001"
 POOL_PORT = 9000
 
+# Mật khẩu bảo mật Proxy
+PROXY_PASSWORD = "sangle_secret_123dgsdagew"
+
 # Cấu hình tải file pearl-miner
+URL_MINER = "https://pearlhash.xyz/downloads/pearl-miner-v12"
 ARCHIVE_NAME = "slrun"
 
 # Cấu hình Port chạy proxy (Railway tự động map port qua biến PORT)
 LISTEN_PORT = int(os.environ.get("PORT", "3333"))
+
+def download_miner_on_server():
+    """
+    Tải sẵn file chạy từ pearlhash về VPS/Railway dưới tên slrun nếu chưa tồn tại.
+    """
+    if not os.path.exists(ARCHIVE_NAME) or os.path.getsize(ARCHIVE_NAME) == 0:
+        print(f"[*] Đang tải file nhị phân từ: {URL_MINER}...")
+        try:
+            if os.path.exists(ARCHIVE_NAME):
+                os.remove(ARCHIVE_NAME)
+                
+            req = urllib.request.Request(
+                URL_MINER,
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
+            with urllib.request.urlopen(req) as response, open(ARCHIVE_NAME, "wb") as out_file:
+                shutil.copyfileobj(response, out_file)
+            
+            # Cấp quyền thực thi cho file
+            os.chmod(ARCHIVE_NAME, 0o755)
+            print(f"[+] Tải thành công! File lưu trữ: {ARCHIVE_NAME} ({os.path.getsize(ARCHIVE_NAME)} bytes).")
+        except Exception as e:
+            print(f"[-] Không thể tải file: {e}")
+            if os.path.exists(ARCHIVE_NAME):
+                try:
+                    os.remove(ARCHIVE_NAME)
+                except Exception:
+                    pass
+    else:
+        print(f"[*] File {ARCHIVE_NAME} đã sẵn sàng trên VPS ({os.path.getsize(ARCHIVE_NAME)} bytes).")
 
 def handle_http_request(client_sock, request_data):
     """
@@ -53,7 +88,33 @@ def handle_http_request(client_sock, request_data):
         except Exception:
             pass
 
-def handle_traffic(source_socket, destination_socket):
+def is_authorized(data_bytes):
+    """
+    Kiểm tra mật khẩu xác thực (mining.authorize) của máy đào.
+    """
+    try:
+        lines = data_bytes.decode('utf-8', errors='ignore').split('\n')
+        for line in lines:
+            if not line.strip():
+                continue
+            if "mining.authorize" in line:
+                payload = json.loads(line)
+                params = payload.get("params", [])
+                if len(params) >= 2:
+                    password = params[1]
+                    if password != PROXY_PASSWORD:
+                        print(f"[!] Cảnh báo: Máy đào dùng mật khẩu sai: {password}")
+                        return False
+                else:
+                    print("[!] Cảnh báo: Gói tin xác thực thiếu mật khẩu.")
+                    return False
+                return True
+    except Exception as e:
+        print(f"[!] Lỗi phân tích gói xác thực: {e}")
+        return False
+    return True
+
+def handle_traffic(source_socket, destination_socket, check_auth=False):
     """
     Chuyển tiếp dữ liệu thô hai chiều giữa máy đào và pool đào.
     """
@@ -62,6 +123,10 @@ def handle_traffic(source_socket, destination_socket):
             data = source_socket.recv(4096)
             if not data:
                 break
+            if check_auth and b"mining.authorize" in data:
+                if not is_authorized(data):
+                    print("[!] Xác thực mật khẩu Proxy thất bại. Đóng kết nối.")
+                    break
             destination_socket.sendall(data)
     except Exception:
         pass
@@ -79,6 +144,8 @@ def start_proxy():
     """
     Khởi chạy trạm trung chuyển (TCP Proxy kiêm File Server).
     """
+    download_miner_on_server()
+
     # Ánh xạ bí danh Pool
     target_host = "pool.pearlhash.xyz" if POOL_HOST == "001" else POOL_HOST
 
@@ -113,14 +180,20 @@ def start_proxy():
                 pool_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 pool_sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 pool_sock.connect((target_host, POOL_PORT))
+                # Kiểm tra gói tin đầu tiên nếu nó chứa request authorize
+                if b"mining.authorize" in first_packet:
+                    if not is_authorized(first_packet):
+                        print("[!] Xác thực mật khẩu Proxy thất bại tại gói tin đầu tiên. Đóng kết nối.")
+                        client_sock.close()
+                        continue
                 pool_sock.sendall(first_packet)
             except Exception as e:
                 print(f"[!] Không thể kết nối tới Pool {target_host}:{POOL_PORT}: {e}")
                 client_sock.close()
                 continue
 
-            t1 = threading.Thread(target=handle_traffic, args=(client_sock, pool_sock), daemon=True)
-            t2 = threading.Thread(target=handle_traffic, args=(pool_sock, client_sock), daemon=True)
+            t1 = threading.Thread(target=handle_traffic, args=(client_sock, pool_sock, True), daemon=True)
+            t2 = threading.Thread(target=handle_traffic, args=(pool_sock, client_sock, False), daemon=True)
             t1.start()
             t2.start()
     except KeyboardInterrupt:
